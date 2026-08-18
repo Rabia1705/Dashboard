@@ -4,7 +4,7 @@ const { useEffect, useRef, useState } = React;
 const TARGET_SCORE = 60;
 const ALL_SHEETS = "__all_sheets__";
 const ASSESSMENT_SHEETS = "__assessment_sheets__";
-const COUNTRY_ORDER = ["China", "Finland", "Italy", "Singapore", "USA"];
+const COUNTRY_ORDER = ["China", "Finland", "Italy", "Singapore", "USA", "Czechia", "UAE", "Netherlands", "Germany", "Malaysia", "Austria", "Canada", "Belgium", "France", "Australia", "Bulgaria", "Slovakia"];
 const YEAR_DATA_FILES = {
   2026: "ISO 27001 Maturity Assessments 2026.xlsx",
   2027: "ISO 27001 Maturity Assessments 2027.xlsx"
@@ -45,7 +45,23 @@ const COUNTRY_ALIASES = new Map([
   ["us", "USA"],
   ["u s", "USA"],
   ["united states", "USA"],
-  ["united states of america", "USA"]
+  ["united states of america", "USA"],
+  ["czechia", "Czechia"],
+  ["czech republic", "Czechia"],
+  ["uae", "UAE"],
+  ["united arab emirates", "UAE"],
+  ["netherlands", "Netherlands"],
+  ["the netherlands", "Netherlands"],
+  ["holland", "Netherlands"],
+  ["germany", "Germany"],
+  ["malaysia", "Malaysia"],
+  ["austria", "Austria"],
+  ["canada", "Canada"],
+  ["belgium", "Belgium"],
+  ["france", "France"],
+  ["australia", "Australia"],
+  ["bulgaria", "Bulgaria"],
+  ["slovakia", "Slovakia"]
 ]);
 
 function formatInt(value) {
@@ -111,7 +127,7 @@ function groupBy(records, keyFn) {
 }
 
 function getOrderedCountries(records) {
-  const seen = new Set(records.map((record) => record.country).filter(Boolean));
+  const seen = new Set(records.map((record) => record.country).filter((country) => country && country !== "Unspecified Country"));
   const ordered = COUNTRY_ORDER.filter((country) => seen.has(country));
   for (const country of [...seen].sort((left, right) => left.localeCompare(right))) {
     if (!ordered.includes(country)) ordered.push(country);
@@ -379,8 +395,6 @@ function normalizeRows(rows, fieldOverrides, sheetFieldMaps) {
         const wideRecords = wideCountryColumns
           .map((wideColumn) => {
             const rawMaturity = resolveValue(row, wideColumn.column, []);
-            if (!normalizeText(rawMaturity)) return null;
-
             const maturity = parseMaturity(rawMaturity);
             const riskScore = parseRisk(resolveValue(row, effectiveFieldMap.risk, []), maturity.score);
             const automated = parseAutomationStatus(resolveValue(row, effectiveFieldMap.automation, []));
@@ -733,6 +747,20 @@ function DashboardInsights(props) {
   return h(React.Fragment, null,
     h("article", { className: "panel" },
       h("div", { className: "panel-head" }, h("div", null,
+        h("h2", null, "Maturity level distribution"),
+        h("p", null, "Number of controls at each maturity level.")
+      )),
+      h("div", { className: "maturity-chart-shell" }, h(MaturityLevelChart, { id: "overview-maturity-level-chart", rows: maturityCounts }))
+    ),
+    h("article", { className: "panel" },
+      h("div", { className: "panel-head" }, h("div", null,
+        h("h2", null, "Domain maturity"),
+        h("p", null, "Average maturity score for each assessed domain.")
+      )),
+      h("div", { className: "country-chart-shell" }, h(CountryComparisonChart, { id: "overview-domain-chart", rows: domainRows }))
+    ),
+    h("article", { className: "panel wide" },
+      h("div", { className: "panel-head" }, h("div", null,
         h("h2", null, "Country comparison"),
         h("p", null, "Overall maturity score by country.")
       ), h("div", { className: "year-toggle" },
@@ -744,20 +772,6 @@ function DashboardInsights(props) {
         }, year))
       )),
       h("div", { className: "country-chart-shell" }, h(CountryComparisonChart, { id: "overview-country-chart", rows: props.countryComparisonRows }))
-    ),
-    h("article", { className: "panel" },
-      h("div", { className: "panel-head" }, h("div", null,
-        h("h2", null, "Maturity level distribution"),
-        h("p", null, "Number of controls at each maturity level.")
-      )),
-      h("div", { className: "maturity-chart-shell" }, h(MaturityLevelChart, { id: "overview-maturity-level-chart", rows: maturityCounts }))
-    ),
-    h("article", { className: "panel wide" },
-      h("div", { className: "panel-head" }, h("div", null,
-        h("h2", null, "Domain maturity"),
-        h("p", null, "Average maturity score for each assessed domain.")
-      )),
-      h("div", { className: "country-chart-shell" }, h(CountryComparisonChart, { id: "overview-domain-chart", rows: domainRows }))
     )
   );
 }
