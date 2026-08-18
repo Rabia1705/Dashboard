@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const port = process.env.PORT || 8080;
 const root = path.join(__dirname, "..", "docs");
+const dataRoot = path.join(__dirname, "..", "data");
 
 function getContentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -14,15 +15,20 @@ function getContentType(filePath) {
     case ".md": return "text/markdown";
     case ".png": return "image/png";
     case ".svg": return "image/svg+xml";
+    case ".xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case ".xls": return "application/vnd.ms-excel";
     default: return "application/octet-stream";
   }
 }
 
 http.createServer((req, res) => {
-  const normalizedPath = req.url.split("?")[0].replace(/\/+$/, "") || "/";
-  let filePath = path.join(root, normalizedPath === "/" ? "index.html" : normalizedPath);
+  const normalizedPath = decodeURIComponent(req.url.split("?")[0]).replace(/\/+$/, "") || "/";
+  const isDataRequest = normalizedPath.startsWith("/data/");
+  const base = isDataRequest ? dataRoot : root;
+  const relativePath = isDataRequest ? normalizedPath.slice("/data/".length) : (normalizedPath === "/" ? "index.html" : normalizedPath);
+  let filePath = path.join(base, relativePath);
 
-  if (!filePath.startsWith(root)) {
+  if (!filePath.startsWith(base)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;

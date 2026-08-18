@@ -5,6 +5,10 @@ const TARGET_SCORE = 60;
 const ALL_SHEETS = "__all_sheets__";
 const ASSESSMENT_SHEETS = "__assessment_sheets__";
 const COUNTRY_ORDER = ["China", "Finland", "Italy", "Singapore", "USA"];
+const YEAR_DATA_FILES = {
+  2026: "ISO 27001 Maturity Assessments 2026.xlsx",
+  2027: "ISO 27001 Maturity Assessments 2027.xlsx"
+};
 const DOMAIN_DEFINITIONS = [
   { key: "HR", label: "HR Security" },
   { key: "Legal", label: "Legal Security" },
@@ -660,6 +664,35 @@ function readWorkbookRows(workbook, scope) {
   });
 }
 
+const embeddedWorkbookCache = {};
+
+function getEmbeddedWorkbook(year) {
+  const cacheKey = String(year);
+  if (embeddedWorkbookCache[cacheKey]) return embeddedWorkbookCache[cacheKey];
+
+  const base64 = window.EMBEDDED_WORKBOOKS && window.EMBEDDED_WORKBOOKS[cacheKey];
+  if (!base64) throw new Error(`No bundled data found for ${year}. Make sure embedded-data.js is loaded.`);
+
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  const workbook = XLSX.read(bytes, { type: "array", cellDates: true });
+  embeddedWorkbookCache[cacheKey] = workbook;
+  return workbook;
+}
+
+function computeCountryComparisonRows(workbook) {
+  const rows = readWorkbookRows(workbook, ALL_SHEETS);
+  const sheetFieldMaps = buildSheetFieldMaps(rows);
+  const validationRows = readValidationRows(workbook);
+  const emptyOverrides = { country: "", site: "", domain: "", control: "", maturity: "", risk: "" };
+  const analysis = analyzeWorkbook(rows, emptyOverrides, sheetFieldMaps, validationRows);
+  return analysis.overview.heatmapRows.map((row) => ({ country: row.country, score: row.overall.score || 0 }));
+}
+
 function ChartCanvas(props) {
   const canvasRef = useRef(null);
 
@@ -687,10 +720,6 @@ function KpiGrid(props) {
 }
 
 function DashboardInsights(props) {
-  const countryRows = props.analysis.overview.heatmapRows.map((row) => ({
-    country: row.country,
-    score: row.overall.score || 0
-  }));
   const domainRows = props.analysis.tabs.map((tab) => ({
     country: tab.key,
     score: tab.averageScore || 0
@@ -706,8 +735,15 @@ function DashboardInsights(props) {
       h("div", { className: "panel-head" }, h("div", null,
         h("h2", null, "Country comparison"),
         h("p", null, "Overall maturity score by country.")
+      ), h("div", { className: "year-toggle" },
+        Object.keys(YEAR_DATA_FILES).map((year) => h("button", {
+          key: year,
+          type: "button",
+          className: `year-button${String(props.activeYear) === year ? " active" : ""}`,
+          onClick: () => props.onSelectYear && props.onSelectYear(Number(year))
+        }, year))
       )),
-      h("div", { className: "country-chart-shell" }, h(CountryComparisonChart, { id: "overview-country-chart", rows: countryRows }))
+      h("div", { className: "country-chart-shell" }, h(CountryComparisonChart, { id: "overview-country-chart", rows: props.countryComparisonRows }))
     ),
     h("article", { className: "panel" },
       h("div", { className: "panel-head" }, h("div", null,
@@ -1299,14 +1335,24 @@ function DomainPanel(props) {
 
 function App() {
   const [workbook, setWorkbook] = useState(null);
-  const [sheetScope, setSheetScope] = useState(ASSESSMENT_SHEETS);
+  const [sheetScope, setSheetScope] = useState(ALL_SHEETS);
   const [activeRows, setActiveRows] = useState([]);
   const [autoFields, setAutoFields] = useState({ columns: [], country: "", site: "", domain: "", control: "", maturity: "", risk: "" });
   const [sheetFieldMaps, setSheetFieldMaps] = useState({});
   const [fieldOverrides, setFieldOverrides] = useState({ country: "", site: "", domain: "", control: "", maturity: "", risk: "" });
   const [fileName, setFileName] = useState("No file loaded");
-  const [status, setStatus] = useState({ message: "Upload an Excel workbook to build the dashboard.", isError: false });
+  const [status, setStatus] = useState({ message: "Loading 2026 assessment data...", isError: false });
   const [activeTab, setActiveTab] = useState(DOMAIN_DEFINITIONS[0].key);
+  const [countryYear, setCountryYear] = useState(2026);
+  const [countryComparisonRows, setCountryComparisonRows] = useState([]);
+
+  useEffect(() => {
+    try {
+      setCountryComparisonRows(computeCountryComparisonRows(getEmbeddedWorkbook(countryYear)));
+    } catch (error) {
+      setCountryComparisonRows([]);
+    }
+  }, [countryYear]);
 
   useEffect(() => {
     if (!workbook) {
@@ -1346,6 +1392,26 @@ function App() {
     });
   }, [workbook, activeRows.length, analysis.records.length, analysis.warnings.join("|")]);
 
+  function applyWorkbook(nextWorkbook) {
+    if (!nextWorkbook.SheetNames || nextWorkbook.SheetNames.length === 0) {
+      throw new Error("Workbook has no sheets.");
+    }
+    setWorkbook(nextWorkbook);
+    setSheetScope(ALL_SHEETS);
+    setFieldOverrides({ country: "", site: "", domain: "", control: "", maturity: "", risk: "" });
+  }
+
+  // Load the bundled 2026 assessment automatically so no manual upload is required on first visit.
+  useEffect(() => {
+    try {
+      applyWorkbook(getEmbeddedWorkbook(2026));
+      setFileName(YEAR_DATA_FILES[2026]);
+      setStatus({ message: "2026 workbook loaded. Building dashboard...", isError: false });
+    } catch (error) {
+      setStatus({ message: error instanceof Error ? error.message : "Unable to load bundled 2026 workbook.", isError: true });
+    }
+  }, []);
+
   async function handleFileChange(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -1361,13 +1427,7 @@ function App() {
 
       const buffer = await file.arrayBuffer();
       const nextWorkbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      if (!nextWorkbook.SheetNames || nextWorkbook.SheetNames.length === 0) {
-        throw new Error("Workbook has no sheets.");
-      }
-
-      setWorkbook(nextWorkbook);
-      setSheetScope(ASSESSMENT_SHEETS);
-      setFieldOverrides({ country: "", site: "", domain: "", control: "", maturity: "", risk: "" });
+      applyWorkbook(nextWorkbook);
       setStatus({ message: "Workbook loaded. Building dashboard...", isError: false });
     } catch (error) {
       setWorkbook(null);
@@ -1401,7 +1461,7 @@ function App() {
         h(
           "div",
           { className: "control-group file-picker span-two" },
-          h("label", { htmlFor: "sourceInput" }, "Upload Excel File"),
+          h("label", { htmlFor: "sourceInput" }, "Upload a Different Excel File (optional)"),
           h("input", { id: "sourceInput", type: "file", accept: ".xlsx,.xls", onChange: handleFileChange })
         ),
         h(
@@ -1420,7 +1480,7 @@ function App() {
       h(
         "section",
         { className: "chart-grid overview-grid" },
-        h(DashboardInsights, { analysis }),
+        h(DashboardInsights, { analysis, activeYear: countryYear, onSelectYear: setCountryYear, countryComparisonRows }),
         h(
           "article",
           { className: "panel wide" },
